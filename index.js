@@ -58,7 +58,7 @@ const verifyToken = async (req, res, next) => {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("tutor-booking-db");
     const tutorCollection = db.collection("tutors");
@@ -163,6 +163,104 @@ async function run() {
       const result = await tutorCollection.deleteOne({
         _id: new ObjectId(tutorsId),
       });
+
+      res.send(result);
+    });
+
+    app.post("/bookings", verifyToken, async (req, res) => {
+      const bookingData = req.body;
+
+      const tutor = await tutorCollection.findOne({
+        _id: new ObjectId(bookingData.tutorId),
+      });
+
+      if (!tutor) {
+        return res.status(404).send({ message: "Tutor not found" });
+      }
+
+      const alreadyBooked = await bookingCollection.findOne({
+        tutorId: bookingData.tutorId,
+        studentEmail: bookingData.studentEmail,
+        status: { $ne: "cancelled" },
+      });
+
+      if (alreadyBooked) {
+        return res.status(409).send({
+          message: "You have already booked this tutor session.",
+        });
+      }
+
+      if (Number(tutor.totalSlot) <= 0) {
+        return res.status(409).send({
+          message:
+            "This session is fully booked. You can't join at the moment.",
+        });
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const sessionDate = new Date(tutor.sessionStartDate);
+      sessionDate.setHours(0, 0, 0, 0);
+
+      if (today > sessionDate) {
+        return res.status(409).send({
+          message: "This tutor session has already started. Booking is closed.",
+        });
+      }
+
+      const booking = {
+        ...bookingData,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      };
+
+      const result = await bookingCollection.insertOne(booking);
+
+      await tutorCollection.updateOne(
+        { _id: new ObjectId(bookingData.tutorId) },
+        { $inc: { totalSlot: -1 } },
+      );
+
+      res.send(result);
+    });
+    app.get("/bookings/:email", verifyToken, async (req, res) => {
+      const { email } = req.params;
+
+      const result = await bookingCollection
+        .find({ studentEmail: email })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(result);
+    });
+
+    app.patch("/bookings/:bookingId", verifyToken, async (req, res) => {
+      const { bookingId } = req.params;
+
+      const booking = await bookingCollection.findOne({
+        _id: new ObjectId(bookingId),
+      });
+
+      if (!booking) {
+        return res.status(404).send({ message: "Booking not found" });
+      }
+
+      if (booking.status === "cancelled") {
+        return res.status(409).send({
+          message: "This booking is already cancelled.",
+        });
+      }
+
+      const result = await bookingCollection.updateOne(
+        { _id: new ObjectId(bookingId) },
+        { $set: { status: "cancelled" } },
+      );
+
+      await tutorCollection.updateOne(
+        { _id: new ObjectId(booking.tutorId) },
+        { $inc: { totalSlot: 1 } },
+      );
 
       res.send(result);
     });
