@@ -33,6 +33,24 @@ const client = new MongoClient(uri, {
 const JWKS = createRemoteJWKSet(
   new URL(`${process.env.CLIENT_URL || "http://localhost:3000"}/api/auth/jwks`),
 );
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://mediqueue-client-orcin.vercel.app",
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  }),
+);
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
